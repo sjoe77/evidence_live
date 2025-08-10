@@ -1,0 +1,7 @@
+# Flight SQL HTTP Connection (Mock Mode)
+name: flight_sql_mock
+type: flight-sql-http
+options:
+  endpoint: "mock"  # Special "mock" endpoint enables mock mode
+  timeout: 30000
+  mock: true

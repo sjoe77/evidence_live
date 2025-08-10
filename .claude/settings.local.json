@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(pnpm install:*)",
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(npx pnpm:*)",
+      "Bash(node:*)",
+      "Bash(FLIGHT_SQL_MOCK=true npm run dev)",
+      "Bash(EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data FLIGHT_SQL_MOCK=true npx vite dev --port 3000)",
+      "Bash(pkill:*)",
+      "Bash(pnpm add:*)",
+      "Bash(EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data npx vite dev --port 3000)",
+      "Bash(npm run dev:*)",
+      "Bash(npx cross-env:*)",
+      "Bash(EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data ./node_modules/.bin/vite dev --port 3000)",
+      "Bash(pnpm:*)",
+      "Bash(npm run postinstall:*)",
+      "Bash(npx run-s:*)",
+      "Bash(EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data node node_modules/vite/bin/vite.js dev --port 3000)",
+      "Bash(curl:*)"
+    ],
+    "deny": []
+  }
+}

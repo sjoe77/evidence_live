@@ -16,6 +16,7 @@
 		"@evidence-dev/csv": "workspace:*",
 		"@evidence-dev/databricks": "workspace:*",
 		"@evidence-dev/duckdb": "workspace:*",
+		"@evidence-dev/flight-sql-http": "workspace:*",
 		"@evidence-dev/mssql": "workspace:*",
 		"@evidence-dev/mysql": "workspace:*",
 		"@evidence-dev/postgres": "workspace:*",

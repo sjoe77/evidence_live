@@ -1,0 +1,20 @@
+{
+  "name": "@evidence-dev/flight-sql-http",
+  "version": "1.0.0",
+  "description": "Flight SQL HTTP datasource for Evidence",
+  "main": "index.cjs",
+  "type": "commonjs",
+  "dependencies": {
+    "@evidence-dev/db-commons": "workspace:*",
+    "node-fetch": "^2.6.7"
+  },
+  "keywords": [
+    "evidence",
+    "datasource", 
+    "flight-sql",
+    "http",
+    "sql"
+  ],
+  "author": "Evidence Dev",
+  "license": "MIT"
+}
