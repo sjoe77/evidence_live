@@ -2,5 +2,6 @@
 name: flight_sql
 type: flight-sql-http
 options:
-  endpoint: "${FLIGHT_SQL_ENDPOINT:http://localhost:8080/api/sql}"
+  endpoint: "mock"  # Use mock mode for testing
   timeout: 30000
+  mock: true
