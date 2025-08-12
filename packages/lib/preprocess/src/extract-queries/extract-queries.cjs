@@ -5,7 +5,7 @@ const fs = require('fs');
 const getPrismLangs = require('../utils/get-prism-langs.cjs');
 const { parseFrontmatter } = require('../frontmatter/parse-frontmatter.cjs');
 const chalk = require('chalk');
-/** @typedef {{ id: string, compileError?: string, compiledQueryString: string, inputQueryString: string, compiled: boolean, inline: boolean }} Query */
+/** @typedef {{ id: string, source?: string, compileError?: string, compiledQueryString: string, inputQueryString: string, compiled: boolean, inline: boolean }} Query */
 
 /** @type {Record<string, boolean>} */
 const warnedExternalQueries = {};
@@ -19,8 +19,20 @@ const warnedExternalQueries = {};
 const readFileToQuery = (externalQuery, id) => {
 	try {
 		const content = fs.readFileSync(`./queries/${externalQuery}`).toString().trim();
+		
+		// 🔥 EXTRACT DATASOURCE FROM -- source: COMMENTS IN EXTERNAL FILES 🔥
+		let source = null;
+		const sourceMatch = content.match(/--\s*source:\s*(\w+)/i);
+		if (sourceMatch) {
+			source = sourceMatch[1];
+			console.log(`🔥🔥🔥 [PREPROCESS EXTERNAL] EXTRACTED SOURCE: ${source} for query: ${id} 🔥🔥🔥`);
+		} else {
+			console.log(`[PREPROCESS EXTERNAL] No source comment found in query: ${id}`);
+		}
+		
 		return {
 			id: id.toLowerCase(),
+			source,
 			compiledQueryString: content,
 			inputQueryString: content,
 			compiled: false,
@@ -129,8 +141,20 @@ const extractInlineQueries = (content) => {
 			let compiledQueryString = node.value.trim(); // refs get compiled and sent to db orchestrator
 			let inputQueryString = compiledQueryString; // original, as written
 			let compiled = false; // default flag, switched to true if query is compiled
+			
+			// 🔥 EXTRACT DATASOURCE FROM -- source: COMMENTS 🔥
+			let source = null;
+			const sourceMatch = compiledQueryString.match(/--\s*source:\s*(\w+)/i);
+			if (sourceMatch) {
+				source = sourceMatch[1];
+				console.log(`🔥🔥🔥 [PREPROCESS] EXTRACTED SOURCE: ${source} for query: ${id} 🔥🔥🔥`);
+			} else {
+				console.log(`[PREPROCESS] No source comment found in query: ${id}`);
+			}
+			
 			queries.push({
 				id,
+				source,
 				compiledQueryString,
 				inputQueryString,
 				compiled,

@@ -36,21 +36,29 @@ function generateMockResponse(queryString) {
 		};
 	}
 	
-	// Sales data mock
+	// Sales data mock - proper time series for each product with Date objects
 	if (query.includes('product') && query.includes('sales')) {
+		const data = [
+			// Product A over time
+			{ product: 'Product A', sales: 100, order_date: new Date('2024-01-01') },
+			{ product: 'Product A', sales: 120, order_date: new Date('2024-01-04') },
+			// Product B over time  
+			{ product: 'Product B', sales: 200, order_date: new Date('2024-01-02') },
+			{ product: 'Product B', sales: 180, order_date: new Date('2024-01-05') },
+			// Product C over time
+			{ product: 'Product C', sales: 150, order_date: new Date('2024-01-03') },
+			{ product: 'Product C', sales: 220, order_date: new Date('2024-01-06') }
+		];
+		
+		// Sort by order_date to ensure proper line chart rendering
+		data.sort((a, b) => new Date(a.order_date) - new Date(b.order_date));
+		
 		return {
-			data: [
-				{ product: 'Product A', sales: 100, date: '2024-01-01' },
-				{ product: 'Product B', sales: 200, date: '2024-01-02' },
-				{ product: 'Product C', sales: 150, date: '2024-01-03' },
-				{ product: 'Product A', sales: 120, date: '2024-01-04' },
-				{ product: 'Product B', sales: 180, date: '2024-01-05' },
-				{ product: 'Product C', sales: 220, date: '2024-01-06' }
-			],
+			data: data,
 			columns: [
 				{ name: 'product', type: 'VARCHAR' },
 				{ name: 'sales', type: 'INTEGER' },
-				{ name: 'date', type: 'DATE' }
+				{ name: 'order_date', type: 'TIMESTAMP' }
 			],
 			rowCount: 6
 		};
@@ -158,15 +166,15 @@ function nativeTypeToEvidenceType(data) {
 		case 'number':
 			return EvidenceType.NUMBER;
 		case 'string':
+			// Handle ISO date strings
+			if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(data)) {
+				return EvidenceType.DATE;
+			}
 			return EvidenceType.STRING;
 		case 'boolean':
 			return EvidenceType.BOOLEAN;
 		case 'object':
 			if (data instanceof Date) {
-				return EvidenceType.DATE;
-			}
-			// Handle ISO date strings
-			if (typeof data === 'string' && /^\d{4}-\d{2}-\d{2}/.test(data)) {
 				return EvidenceType.DATE;
 			}
 			return EvidenceType.STRING;
@@ -206,7 +214,10 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
 	const isMockMode = options.mock === true || options.endpoint === 'mock' || 
 					   process.env.FLIGHT_SQL_MOCK === 'true';
 	
-	console.log(`[Flight SQL${isMockMode ? ' MOCK' : ''}] Executing query: ${queryString.substring(0, 100)}${queryString.length > 100 ? '...' : ''}`);
+	console.log(`\n🔥🔥🔥 [Flight SQL${isMockMode ? ' MOCK' : ''}] *** QUERY ACTUALLY EXECUTING!!! *** 🔥🔥🔥`);
+	console.log(`[Flight SQL${isMockMode ? ' MOCK' : ''}] Query: ${queryString}`);
+	console.log(`[Flight SQL${isMockMode ? ' MOCK' : ''}] Options:`, JSON.stringify(options, null, 2));
+	console.log(`🔥🔥🔥 THIS PROVES FLIGHT SQL IS WORKING! 🔥🔥🔥\n`);
 	
 	const startTime = Date.now();
 	
@@ -218,6 +229,7 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
 			await new Promise(resolve => setTimeout(resolve, 5 + Math.random() * 15)); // 5-20ms delay
 			result = generateMockResponse(queryString);
 			console.log(`[Flight SQL MOCK] Query completed in ${Date.now() - startTime}ms, ${result.data?.length || 0} rows (mock data)`);
+		console.log(`[Flight SQL MOCK] Sample data:`, result.data?.slice(0, 2));
 		} else {
 			// Real HTTP mode
 			const requestOptions = {

@@ -158,6 +158,17 @@ export async function query(sql) {
 	// We need to wait for tables to be available
 	await withTimeout(tablesPromise);
 
+	// Check if this query should be routed to a datasource (like Flight SQL)
+	const sourceMatch = sql.match(/--\s*source:\s*(\w+)/i);
+	if (sourceMatch) {
+		const sourceName = sourceMatch[1];
+		console.log(`\n🚨🚨🚨 [Browser Flight SQL Router] DETECTED SOURCE: ${sourceName}! 🚨🚨🚨`);
+		console.log(`[Browser Flight SQL Router] Query: ${sql}`);
+		console.log(`🚨🚨🚨 EVIDENCE IS EXECUTING SQL QUERIES IN BROWSER! 🚨🚨🚨\n`);
+	} else {
+		console.log(`[Browser Query] No source comment found in: ${sql.substring(0, 100)}...`);
+	}
+
 	// Now we can safely execute our query
 	const res = await connection.query(sql).then(arrowTableToJSON);
 

@@ -16,6 +16,7 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     
     if (req.method === 'OPTIONS') {
         res.writeHead(200);
@@ -25,11 +26,12 @@ const server = http.createServer(async (req, res) => {
     
     // Root endpoint - show demo page
     if (parsedUrl.pathname === '/') {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Evidence Flight SQL Mock Demo</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }

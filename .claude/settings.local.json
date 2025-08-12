@@ -21,7 +21,15 @@
       "Bash(npm run postinstall:*)",
       "Bash(npx run-s:*)",
       "Bash(EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data node node_modules/vite/bin/vite.js dev --port 3000)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(./start-mock.sh:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(npm run sources:*)",
+      "Bash(grep:*)",
+      "Bash(git checkout:*)",
+      "WebFetch(domain:docs.evidence.dev)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

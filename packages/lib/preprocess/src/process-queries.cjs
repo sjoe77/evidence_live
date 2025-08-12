@@ -261,7 +261,9 @@ const processQueries = (componentDevelopmentMode) => {
 	const dynamicQueries = {};
 	return {
 		markup({ content, filename }) {
+			console.log(`🔥🔥🔥 [PROCESS QUERIES] Processing file: ${filename} 🔥🔥🔥`);
 			if (filename?.endsWith('.md')) {
+				console.log(`🔥🔥🔥 [PROCESS QUERIES] Processing markdown file: ${filename} 🔥🔥🔥`);
 				let fileQueries = extractQueries(content);
 
 				dynamicQueries[getRouteHash(filename)] = fileQueries.reduce((acc, q) => {
