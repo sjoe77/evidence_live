@@ -26,11 +26,16 @@ const loadDB = async () => {
 	if (!browser) {
 		const { readFile } = await import('fs/promises');
 		({ renderedFiles } = JSON.parse(
-			await readFile('./static/data/manifest.json', 'utf-8').catch(() => '{}')
+			await readFile('./static/data/manifest.json', 'utf-8').catch(() => '{"renderedFiles":{}}')
 		));
 	} else {
-		const res = await fetch(addBasePath('/data/manifest.json'));
-		if (res.ok) ({ renderedFiles } = await res.json());
+		try {
+			const res = await fetch(addBasePath('/data/manifest.json'));
+			if (res.ok) ({ renderedFiles } = await res.json());
+		} catch (error) {
+			console.log('[Flight SQL Mode] No manifest.json found - using empty manifest for Flight SQL mode');
+			renderedFiles = {};
+		}
 	}
 	
 	await profile(initDB);
@@ -288,7 +293,8 @@ export const load = async ({ fetch, route, params, url }) => {
 		
 		// Check for -- source: comment to route to datasource plugins
 		const sourceMatch = sql.match(/--\s*source:\s*(\w+)/i);
-		const defaultDataSource = process.env.EVIDENCE_DEFAULT_DATASOURCE || 'flight_sql_mock';
+		// 🔥 BROWSER-SAFE DEFAULT DATASOURCE 🔥
+		const defaultDataSource = (typeof process !== 'undefined' && process.env?.EVIDENCE_DEFAULT_DATASOURCE) || 'flight_sql_mock';
 		const sourceName = sourceMatch ? sourceMatch[1] : defaultDataSource;
 		
 		console.log(`🔥🔥🔥 [LAYOUT QUERY] DATASOURCE: ${sourceName} ${sourceMatch ? '(explicit)' : '(default)'} 🔥🔥🔥`);
