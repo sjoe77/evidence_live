@@ -1,0 +1,8 @@
+# Flight SQL HTTP Connection
+name: flight_sql
+type: flight-sql-http
+options:
+  endpoint: "http://localhost:4180/query"  # Route through OAuth proxy to HTTP middleware (port 31338)
+  timeout: 30000
+  headers:
+    Content-Type: "application/x-www-form-urlencoded"

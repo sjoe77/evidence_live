@@ -139,30 +139,14 @@ development:
   host: "0.0.0.0"
 ```
 
-### Default Datasource Configuration ✅
-**All SQL queries automatically use Flight SQL - no `-- source:` comments required!**
-
-**Option 1: Environment Variable (Recommended)**
-```bash
-# In package.json dev script or shell
-EVIDENCE_DEFAULT_DATASOURCE=flight_sql_mock
-```
-
-**Option 2: Config File (Current Setup) ✅**
+### Data Source Configuration  
 ```yaml
-# evidence.config.yaml
-datasource:
-  default: "flight_sql_mock"  # For development with mock data
-  
-# For production with real Flight SQL API:
-# datasource:
-#   default: "flight_sql"
-```
-
-**Option 3: Legacy per-query override**
-```sql
--- source: flight_sql_mock
-SELECT * FROM sales_data
+# sources/main/connection.yaml
+name: main
+type: flight-sql-http
+options:
+  endpoint: http://localhost:8080/api/sql
+  timeout: 30000
 ```
 
 ### Environment Variables
@@ -174,17 +158,13 @@ DEBUG=evidence:*
 
 ## Success Metrics
 
-### Phase 1 Success Criteria ✅ **COMPLETED**
+### Phase 1 Success Criteria
 - ✅ Evidence dashboards render with Flight SQL data
 - ✅ All Evidence features work unchanged  
 - ✅ Development workflow functional in VSCode
 - ✅ Query performance: 15-25ms total latency
 - ✅ No static build step required
 - ✅ Hot reload for development efficiency
-- ✅ **Mock mode integration complete** - Browser and server-side execution
-- ✅ **Default datasource configuration** - No `-- source:` comments required
-- ✅ **All components working** - LineChart, DataTable, BigValue, Dropdown
-- ✅ **Query chaining preserved** - `${other_query}` syntax functional
 
 ### Phase 2 Success Criteria  
 - ✅ Monaco editor with Evidence syntax highlighting
@@ -211,29 +191,97 @@ This vision maintains Evidence's core strength (simple markdown + SQL → beauti
 
 ---
 
-## 🎉 Phase 1 Implementation Complete! 🎉
+## ✅ IMPLEMENTATION STATUS (Current)
 
-**Date**: January 2025  
-**Status**: ✅ **FULLY OPERATIONAL**
+### Phase 1: COMPLETED ✅ 
+**Evidence → Live Flight SQL Dashboard System**
 
-### What's Working ✅
-- **Evidence → Flight SQL transformation complete**
-- **Live dashboard rendering** with 15-25ms query response times
-- **Mock mode fully functional** - browser and server-side execution
-- **All Evidence components working**: LineChart, DataTable, BigValue, Dropdown
-- **Query chaining preserved**: `${other_query}` syntax functional
-- **Development workflow**: VSCode with hot reload and console logging
-- **Default datasource configuration**: No `-- source:` comments required
-- **Dual-mode system**: Server uses Flight SQL connector, browser uses mock data
-- **Line charts rendering continuous lines** with proper date formatting
+**What's Been Built:**
+- ✅ **Core Evidence Transformation**: Evidence.dev successfully converted to live query system
+- ✅ **Flight SQL HTTP Integration**: `@evidence-dev/flight-sql-http` datasource working with mock data
+- ✅ **Multi-Dashboard Runtime**: `sites/multi-dashboard-runtime/` - single Evidence runtime serving multiple dashboards
+- ✅ **Dynamic Routing**: `/dashboards/[dashboard]` route handles any dashboard dynamically
+- ✅ **Dashboard Directory Structure**: Each dashboard in its own folder (`dashboards/SalesDashboard/`, `dashboards/TestDashboard/`)
+- ✅ **Live Query Execution**: All SQL queries execute at runtime (no static build)
+- ✅ **Evidence Features Retained**: Components, filters, parameters, interactions all working
 
-### Ready for Production Integration 🚀
-The system is now ready to integrate with your real Flight SQL API by simply changing the configuration from `flight_sql_mock` to `flight_sql` and providing the production endpoint.
+**Current Architecture:**
+```
+sites/multi-dashboard-runtime/
+├── dashboards/
+│   ├── SalesDashboard/+page.md    → /dashboards/SalesDashboard
+│   ├── TestDashboard/+page.md     → /dashboards/TestDashboard  
+│   └── [Any New Dashboard]/       → /dashboards/[Any New Dashboard]
+├── sources/
+│   ├── flight_sql_mock/           → Currently active (mock data)
+│   └── flight_sql/                → Ready for production
+└── evidence.config.yaml           → datasource: default: "flight_sql_mock"
+```
 
-**Tomorrow's Integration Plan**:
-1. Update `evidence.config.yaml`: `default: "flight_sql"`
-2. Configure production Flight SQL endpoint
-3. Test real data queries and dashboard rendering
-4. Deploy Evidence as live dashboard view layer
+**Working Features:**
+- ✅ Dynamic dashboard loading from separate directories
+- ✅ Evidence components (LineChart, DataTable, BigValue) rendering with live data  
+- ✅ SQL query execution via Flight SQL HTTP datasource
+- ✅ Full Evidence markdown + SQL syntax preserved
+- ✅ Ready for S3 folder-based dashboard architecture
 
-The Evidence → Flight SQL transformation is **complete and successful**! 🎊
+## 🚧 NEXT PHASE: OAuth Proxy Integration
+
+### Current Challenge: Authentication Integration
+**Goal**: Integrate Evidence runtime behind OAuth proxy in ducklake auth stack
+
+**Ducklake Auth Stack Architecture:**
+```
+Browser → OAuth Proxy (port 4180) → HTTP Middleware (port 8080) → Flight SQL Server → DuckDB/DuckLake → Object Store
+          /Users/rajesh/ducklake_auth_stack/gate_keeper/oauth2_proxy.py
+```
+
+**Required Integration Steps:**
+
+#### 1. **OAuth Proxy Configuration** (`ducklake_auth_stack/gate_keeper/oauth2_proxy.py`)
+- Add `/dashboards` route mapping to Evidence runtime
+- Configure proxy to forward authenticated requests to Evidence
+- Ensure header injection: `X-ID-Token`, `X-Email`, `X-Client-ID`
+
+#### 2. **Evidence Flight SQL Configuration** (`sites/multi-dashboard-runtime/`)  
+- Switch from `flight_sql_mock` to `flight_sql` in `evidence.config.yaml`
+- Update `sources/flight_sql/connection.yaml` with real HTTP middleware endpoint
+- Configure Evidence to accept and forward authentication headers
+
+#### 3. **Authentication Flow**
+```
+User → http://localhost:4180/dashboards/SalesDashboard 
+     → OAuth authentication 
+     → Evidence runtime 
+     → SQL queries with user context 
+     → Live dashboards with real ducklake data
+```
+
+**HTTP Middleware API Format:**
+```
+POST http://localhost:4180/query?q=SELECT%20status,%20count(*)%20FROM%20my_ducklake.main.claims%20group%20by%20status
+
+Response:
+{
+  "sql": "SELECT status, count(*) FROM my_ducklake.main.claims group by status",
+  "columns": ["status", "count_star()"],
+  "results": [["Resolved", 4], ["Rejected", 4], ["Pending", 9]]
+}
+```
+
+### Benefits of Current Implementation
+- **Multi-Tenant Ready**: Each dashboard directory = tenant namespace (future S3 folders)
+- **Zero Evidence Code Changes**: All Evidence features work unchanged
+- **Dynamic Scaling**: Single runtime serves unlimited dashboards
+- **Development Workflow**: Standard Evidence markdown + SQL authoring
+- **Performance**: Live queries with 15-25ms total latency
+
+### Future S3 Integration Vision
+```
+dashboards/
+├── tenant-a-sales/+page.md     → S3: s3://dashboards/tenant-a-sales/+page.md
+├── tenant-b-analytics/+page.md → S3: s3://dashboards/tenant-b-analytics/+page.md  
+└── shared-reports/+page.md     → S3: s3://dashboards/shared-reports/+page.md
+```
+
+**This completes the Evidence transformation while maintaining the original vision of simple markdown + SQL → beautiful live dashboards powered by your high-performance ducklake infrastructure.**
