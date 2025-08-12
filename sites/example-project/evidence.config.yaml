@@ -9,6 +9,7 @@ plugins:
     "@evidence-dev/csv": {}
     "@evidence-dev/databricks": {}
     "@evidence-dev/duckdb": {}
+    "@evidence-dev/flight-sql-http": {}
     "@evidence-dev/mssql": {}
     "@evidence-dev/mysql": {}
     "@evidence-dev/postgres": {}
@@ -18,3 +19,11 @@ plugins:
 
 appearance:
   switcher: true
+
+# 🔥 Evidence → Flight SQL Configuration 🔥
+datasource:
+  default: "flight_sql_mock"  # Default datasource for queries without -- source: comments
+  
+# For production, change to:
+# datasource:
+#   default: "flight_sql"

@@ -36,34 +36,8 @@ export const evidencePlugin = async () => {
 					fileName: path.join('_evidence', 'manifest.json'),
 					needsCodeReference: false
 				});
-				const dataDirExists = await fs
-					.stat(dataDirectory)
-					.then((r) => r.isDirectory())
-					.catch(() => false);
-				if (!dataDirExists) {
-					console.warn(
-						chalk.yellow(
-							'Evidence data directory not found, if you use source queries in this project, you probably need to run sources'
-						)
-					);
-					return;
-				}
-
-				const queries = await fs.readdir(dataDirectory, { recursive: true, withFileTypes: true });
-
-				for (const query of queries) {
-					if (query.isFile() && query.name.endsWith('.parquet')) {
-						const relPath = path.join(path.relative(dataDirectory, query.path), query.name);
-
-						this.emitFile({
-							type: 'asset',
-							name: path.join('_evidence', relPath),
-							source: await fs.readFile(path.join(query.path, query.name)),
-							fileName: path.join('_evidence', relPath),
-							needsCodeReference: false
-						});
-					}
-				}
+				// Static parquet generation disabled - using live Flight SQL queries
+				console.log('[Evidence] Static parquet generation disabled - using live Flight SQL queries');
 			}
 		},
 

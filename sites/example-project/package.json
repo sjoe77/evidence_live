@@ -2,7 +2,7 @@
 	"name": "@evidence-dev/components",
 	"version": "3.5.51",
 	"scripts": {
-		"dev": "cross-env EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data vite dev --port 3000",
+		"dev": "cross-env EVIDENCE_PAGES_DIR=./src/pages EVIDENCE_DEFAULT_DATASOURCE=flight_sql_mock vite dev --port 3000",
 		"build": "cross-env EVIDENCE_PAGES_DIR=./src/pages NODE_OPTIONS=--max-old-space-size=8192 vite build",
 		"sources": "cross-env EVIDENCE_DATA_DIR=./static/data EVIDENCE_DATA_URL_PREFIX=static/data evidence sources",
 		"preview": "vite preview --port 3000",
@@ -16,6 +16,7 @@
 		"@evidence-dev/csv": "workspace:*",
 		"@evidence-dev/databricks": "workspace:*",
 		"@evidence-dev/duckdb": "workspace:*",
+		"@evidence-dev/flight-sql-http": "workspace:*",
 		"@evidence-dev/mssql": "workspace:*",
 		"@evidence-dev/mysql": "workspace:*",
 		"@evidence-dev/postgres": "workspace:*",

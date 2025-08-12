@@ -11,6 +11,7 @@
 		"@evidence-dev/duckdb": "link:packages/datasources/duckdb",
 		"@evidence-dev/evidence": "link:packages/evidence",
 		"@evidence-dev/faker-datasource": "link:packages/datasources/faker",
+		"@evidence-dev/flight-sql-http": "link:packages/datasources/flight-sql-http",
 		"@evidence-dev/icons": "link:packages/ui/icons",
 		"@evidence-dev/motherduck": "link:packages/datasources/motherduck",
 		"@evidence-dev/mssql": "link:packages/datasources/mssql",

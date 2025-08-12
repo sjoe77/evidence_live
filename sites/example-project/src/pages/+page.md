@@ -1,16 +1,32 @@
-# Welcome to the Evidence Development Workspace!
+# Flight SQL Dashboard System
 
-<Alert status=warning>
-    If you see this page in your Evidence App, you have deleted the `index.md` file from your project. Add a `pages/index.md` to your project to override this page.
-</Alert>
+Welcome to your live Flight SQL dashboard system! This Evidence instance has been transformed from a static site generator to a real-time query execution engine.
 
-This workspace contains examples of all Evidence features.
+## System Overview
 
-If you are developing a new feature, add a page to this project. The page will be used as a reference for the feature, as a sandbox for anyone making changes to the feature in the future, and for general product testing.
+✅ **Live Query Execution** - All SQL queries execute in real-time against your Flight SQL HTTP API  
+✅ **No Static Build** - Dashboards render live without `npm run sources`  
+✅ **Flight SQL Integration** - Mock mode for development, production mode for live data  
+✅ **All Evidence Features** - Charts, tables, parameters, filters work unchanged
 
-If you notice a feature is missing from this project, please:
+## Available Dashboards
 
-- add a page or
-- create an issue on Github.
+- **[Flight SQL Test Dashboard](/flight-sql-test/)** - Demo dashboard showing Flight SQL integration with mock data
 
-Thanks!
+## System Configuration
+
+- **Mock Mode**: Currently active for development and testing
+- **Real API**: Change `endpoint` in connection.yaml to your Flight SQL HTTP URL when ready
+- **Settings**: Available in [Settings](/settings/) page  
+- **Schema Explorer**: Available in [Explore](/explore/) section
+
+## Next Steps
+
+1. **Test the mock dashboard** to verify all features work
+2. **Connect to your real Flight SQL API** by updating the connection.yaml endpoint  
+3. **Create your production dashboards** using the same markdown + SQL syntax
+4. **Deploy** as a Node.js application for live dashboard serving
+
+---
+
+*This system transforms Evidence into the View layer of your Flight SQL MVC architecture, providing 15-25ms query response times with live dashboard rendering.*

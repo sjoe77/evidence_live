@@ -10,6 +10,7 @@ import { createRequire } from 'module';
 import path, { dirname, resolve } from 'path';
 import { cache_for_hash, get_arrow_if_sql_already_run } from '../cache-duckdb.js';
 import { withTimeout } from './both.js';
+import { loadSourcePlugins } from '@evidence-dev/sdk/plugins';
 
 const require = createRequire(import.meta.url);
 const DUCKDB_DIST = dirname(require.resolve('@duckdb/duckdb-wasm'));
@@ -141,7 +142,63 @@ export async function setParquetURLs(urls, { append } = {}) {
  * @param {Parameters<typeof cache_for_hash>[2]} [cache_options]
  * @returns {Record<string, unknown>[]}
  */
-export function query(sql, cache_options) {
+/**
+ * Routes SQL queries to appropriate datasources based on -- source: comments
+ * @param {string} sql - SQL query string
+ * @returns {Promise<import("apache-arrow").Table | null>} - Arrow table or null if not handled
+ */
+async function routeQueryToDatasource(sql) {
+	try {
+		// Extract source comment from SQL
+		const sourceMatch = sql.match(/--\s*source:\s*(\w+)/i);
+		if (!sourceMatch) {
+			return null; // No source specified, use DuckDB
+		}
+
+		const sourceName = sourceMatch[1];
+		console.log(`[Flight SQL Router] Found source: ${sourceName} for query: ${sql.substring(0, 100)}...`);
+		
+		// Load datasource plugins
+		const plugins = await loadSourcePlugins();
+		const datasource = plugins.bySource[sourceName];
+		
+		if (!datasource) {
+			console.log(`[Flight SQL Router] No plugin found for source: ${sourceName}`);
+			return null;
+		}
+
+		console.log(`[Flight SQL Router] Routing to plugin: ${datasource[0]}`);
+		
+		// Get the plugin runner
+		const [pluginPackage, pluginSpec] = datasource;
+		const sourceConfig = plugins.sources.find(s => s.name === sourceName);
+		
+		if (!sourceConfig) {
+			console.log(`[Flight SQL Router] No config found for source: ${sourceName}`);
+			return null;
+		}
+
+		console.log(`[Flight SQL Router] Executing query via ${pluginPackage} plugin...`);
+		
+		// Get the runner and execute the query
+		const runner = await pluginSpec.getRunner(sourceConfig.options, sourceConfig.dir);
+		const result = await runner(sql, `${sourceName}.sql`, 100000);
+		
+		if (result) {
+			// For now, just log success and fallback to DuckDB
+			// TODO: Convert datasource result to proper Arrow table format
+			console.log(`[Flight SQL Router] Query executed successfully via datasource plugin`);
+			console.log(`[Flight SQL Router] Falling back to DuckDB for Arrow table conversion`);
+		}
+		
+		return null; // Always fallback for now until Arrow conversion is implemented
+	} catch (error) {
+		console.error(`[Flight SQL Router] Error routing query:`, error);
+		return null;
+	}
+}
+
+export async function query(sql, cache_options) {
 	let result;
 
 	// only cache during build, because
@@ -153,7 +210,13 @@ export function query(sql, cache_options) {
 	// TODO: This just fails, where is the process going?
 	// if cache missed, fallback to querying
 	if (!result) {
-		result = connection.query(sql);
+		// Check if this is a Flight SQL query that should route to datasources
+		result = await routeQueryToDatasource(sql);
+		
+		// If no datasource handled it, fall back to DuckDB
+		if (!result) {
+			result = connection.query(sql);
+		}
 	}
 
 	if (cache_options) {
