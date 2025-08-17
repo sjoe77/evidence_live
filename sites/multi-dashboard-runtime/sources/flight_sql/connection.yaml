@@ -1,8 +1,6 @@
-# Flight SQL HTTP Connection
+# Flight SQL HTTP Connection - Real DuckLake Data
 name: flight_sql
 type: flight-sql-http
 options:
-  endpoint: "http://localhost:4180/query"  # Route through OAuth proxy to HTTP middleware (port 31338)
+  endpoint: "http://localhost:4180/query"  # Your working ducklake endpoint (auth suppressed)
   timeout: 30000
-  headers:
-    Content-Type: "application/x-www-form-urlencoded"

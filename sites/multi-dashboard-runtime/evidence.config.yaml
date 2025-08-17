@@ -22,4 +22,6 @@ appearance:
 
 # 🔥 Evidence → Flight SQL Configuration 🔥
 datasource:
-  default: "flight_sql"  # Default datasource for queries without -- source: comments
+  default: "flight_sql"  # Use real Flight SQL endpoint for no-auth development testing
+
+# Evidence will run behind OAuth proxy without base path

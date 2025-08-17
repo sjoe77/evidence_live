@@ -1,11 +1,23 @@
-const {
-	EvidenceType,
-	TypeFidelity,
-	asyncIterableToBatchedAsyncGenerator,
-	cleanQuery,
-	exhaustStream
-} = require('@evidence-dev/db-commons');
-const fetch = require('node-fetch');
+// Use native fetch (Node.js 18+) instead of node-fetch to avoid require() issues
+
+// Local Evidence type definitions (simplified for Flight SQL HTTP connector)
+const EvidenceType = {
+	BOOLEAN: 'boolean',
+	NUMBER: 'number', 
+	STRING: 'string',
+	DATE: 'date'
+};
+
+const TypeFidelity = {
+	INFERRED: 'inferred',
+	PRECISE: 'precise'
+};
+
+// Simple exhaustStream implementation for HTTP results (no streaming needed)
+const exhaustStream = async (result) => {
+	// For HTTP Flight SQL, results are already consumed - no streaming to exhaust
+	return;
+};
 
 /**
  * Mock data generator for testing
@@ -231,14 +243,14 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
 			console.log(`[Flight SQL MOCK] Query completed in ${Date.now() - startTime}ms, ${result.data?.length || 0} rows (mock data)`);
 		console.log(`[Flight SQL MOCK] Sample data:`, result.data?.slice(0, 2));
 		} else {
-			// Real HTTP mode
+			// Real HTTP mode - Use POST with JSON body containing 'query' field
 			const requestOptions = {
 				method: 'POST',
-				headers: { 
+				headers: {
 					'Content-Type': 'application/json'
 				},
-				body: JSON.stringify({ 
-					sql: queryString,
+				body: JSON.stringify({
+					query: queryString,
 					timeout: options.timeout || 30000
 				})
 			};
@@ -247,7 +259,15 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
 			if (options.auth) {
 				requestOptions.headers['Authorization'] = options.auth;
 			}
+			
+			// Add custom headers (for OAuth tokens)
+			if (options.headers) {
+				Object.assign(requestOptions.headers, options.headers);
+				console.log(`[Flight SQL] Added custom headers:`, Object.keys(options.headers));
+			}
 
+			console.log(`[Flight SQL] Making POST request to: ${options.endpoint}`);
+			console.log(`[Flight SQL] Request body:`, JSON.stringify(JSON.parse(requestOptions.body), null, 2));
 			const response = await fetch(options.endpoint, requestOptions);
 
 			if (!response.ok) {
@@ -255,10 +275,29 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
 				throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ' - ' + errorText : ''}`);
 			}
 
-			result = await response.json();
+			const rawResult = await response.json();
 			const duration = Date.now() - startTime;
 			
+			// Convert DuckLake format {results: [[]], columns: []} to Evidence format {data: [{}], rowCount: N}
+			const data = [];
+			if (rawResult.results && rawResult.columns) {
+				for (const row of rawResult.results) {
+					const rowObj = {};
+					for (let i = 0; i < rawResult.columns.length; i++) {
+						rowObj[rawResult.columns[i]] = row[i];
+					}
+					data.push(rowObj);
+				}
+			}
+			
+			result = {
+				data: data,
+				columns: rawResult.columns?.map(col => ({ name: col, type: 'VARCHAR' })) || [],
+				rowCount: data.length
+			};
+			
 			console.log(`[Flight SQL] Query completed in ${duration}ms, ${result.data?.length || 0} rows`);
+			console.log(`[Flight SQL] Sample result:`, result.data?.slice(0, 2));
 		}
 
 		// Ensure we have data and columns
@@ -284,22 +323,20 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
 			columnTypes = [];
 		}
 
-		// Create async generator for compatibility with Evidence's streaming interface
-		async function* rowGenerator() {
-			for (const row of standardizedRows) {
-				yield row;
-			}
-		}
+		// Return data in Evidence-compatible format
+		const evidenceResult = {
+			data: standardizedRows,
+			rowCount: result.rowCount || standardizedRows.length,
+			columnTypes: columnTypes
+		};
 
-		const results = await asyncIterableToBatchedAsyncGenerator(rowGenerator(), batchSize, {
-			standardizeRow: (row) => row, // Already standardized
-			closeConnection: () => Promise.resolve()
+		console.log(`[Flight SQL] Returning Evidence-compatible result:`, {
+			dataLength: evidenceResult.data.length,
+			rowCount: evidenceResult.rowCount,
+			columnCount: evidenceResult.columnTypes.length
 		});
 
-		results.columnTypes = columnTypes;
-		results.expectedRowCount = result.rowCount || standardizedRows.length;
-
-		return results;
+		return evidenceResult;
 
 	} catch (error) {
 		const duration = Date.now() - startTime;
@@ -316,7 +353,7 @@ const runQuery = async (queryString, options = {}, batchSize = 100000) => {
  */
 
 /** @type {import("@evidence-dev/db-commons").GetRunner<FlightSqlHttpOptions>} */
-module.exports.getRunner = async (opts, directory) => {
+const getRunnerImpl = async (opts, directory) => {
 	if (!opts.endpoint) {
 		console.error(`Missing required flight-sql-http option 'endpoint' (${directory})`);
 		throw new Error('Missing required option: endpoint');
@@ -334,7 +371,7 @@ module.exports.getRunner = async (opts, directory) => {
 };
 
 /** @type {import("@evidence-dev/db-commons").ConnectionTester<FlightSqlHttpOptions>} */
-module.exports.testConnection = async (opts, directory) => {
+const testConnectionImpl = async (opts, directory) => {
 	const isMockMode = opts.mock === true || opts.endpoint === 'mock' || 
 					   process.env.FLIGHT_SQL_MOCK === 'true';
 	
@@ -360,7 +397,7 @@ module.exports.testConnection = async (opts, directory) => {
 	}
 };
 
-module.exports.options = {
+const optionsImpl = {
 	endpoint: {
 		title: 'Flight SQL HTTP Endpoint',
 		type: 'string',
@@ -384,13 +421,23 @@ module.exports.options = {
 	}
 };
 
-// Store the function references before reassigning
-const savedGetRunner = module.exports.getRunner;
-const savedTestConnection = module.exports.testConnection;
-const savedOptions = module.exports.options;
-
-// Export main runQuery function and preserve other exports
+// CommonJS exports (matching Evidence datasource pattern)
 module.exports = runQuery;
-module.exports.getRunner = savedGetRunner;
-module.exports.testConnection = savedTestConnection;
-module.exports.options = savedOptions;
+module.exports.getRunner = getRunnerImpl;
+module.exports.testConnection = testConnectionImpl;
+module.exports.options = {
+	endpoint: { 
+		type: 'string', 
+		description: 'HTTP endpoint URL for Flight SQL service (e.g., http://localhost:31338/query)' 
+	},
+	mock: { 
+		type: 'boolean', 
+		description: 'Use mock data instead of real Flight SQL connection',
+		default: false
+	},
+	timeout: { 
+		type: 'number', 
+		description: 'Request timeout in milliseconds',
+		default: 30000
+	}
+};

@@ -15,14 +15,27 @@ const transformError = (e) => {
 	}
 };
 
-/** @type {import("@sveltejs/kit").HandleClientError } */
+/** @type {import("@sveltejs/kit").HandleServerError } */
 export const handleError = (e) => {
-	log.error(`${e.message} | ${e.event.route.id ?? ''}`, {
-		url: e.event.url.href,
-		status: e.status
+	// More detailed error logging for debugging
+	const errorDetails = {
+		url: e.event?.url?.href || 'unknown',
+		status: e.status || 500,
+		route: e.event?.route?.id || 'unknown',
+		message: e.error?.message || e.message || 'Unknown error',
+		stack: e.error?.stack || e.stack
+	};
+	
+	// Log full error details to console for debugging
+	console.error('[ERROR SERVER]', errorDetails);
+	
+	log.error(`${errorDetails.message} | ${errorDetails.route}`, {
+		url: errorDetails.url,
+		status: errorDetails.status,
+		stack: errorDetails.stack
 	});
 	log.debug(e);
-	return transformError(e.error);
+	return transformError(e.error || e);
 };
 
 /** @type {import('@sveltejs/kit').Handle} */

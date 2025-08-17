@@ -29,7 +29,12 @@
       "Bash(grep:*)",
       "Bash(git checkout:*)",
       "WebFetch(domain:docs.evidence.dev)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(find:*)",
+      "WebFetch(domain:evidence.dev)",
+      "Bash(npm run build:*)",
+      "Bash(true)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

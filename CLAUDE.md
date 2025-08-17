@@ -285,3 +285,31 @@ dashboards/
 ```
 
 **This completes the Evidence transformation while maintaining the original vision of simple markdown + SQL → beautiful live dashboards powered by your high-performance ducklake infrastructure.**
+
+---
+
+## 🔧 DUCKLAKE STACK MANAGEMENT
+
+### Starting/Restarting the DuckLake Auth Stack
+
+**Command:**
+```bash
+cd /Users/rajesh/ducklake_auth_stack
+source .venv/bin/activate
+./run_stack_simple.sh
+```
+
+**Services Started:**
+- **OAuth Proxy** (port 4180) - Authentication and request routing  
+- **HTTP Middleware** (port 31338) - JSON API for SQL execution
+- **Flight SQL Server** (port 31337) - gRPC Flight SQL server  
+
+**Stack Components:**
+- `oauth2_proxy.py` - FastAPI OAuth proxy with session management
+- HTTP middleware - Bridges JSON API to Flight SQL gRPC
+- Flight SQL server - DuckDB with DuckLake extension for Parquet/Iceberg data
+
+**Important Notes:**
+- Must activate virtual environment (`.venv`) before running
+- Script handles starting all components in correct order
+- Use this script for clean restarts during development/testing

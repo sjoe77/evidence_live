@@ -1,7 +1,0 @@
-# Flight SQL HTTP Connection
-name: flight_sql
-type: flight-sql-http
-options:
-  endpoint: "mock"  # Use mock mode for testing
-  timeout: 30000
-  mock: true

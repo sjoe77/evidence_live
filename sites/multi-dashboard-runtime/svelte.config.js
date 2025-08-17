@@ -24,6 +24,14 @@ const config = {
 		files: {
 			routes: 'src/pages'
 			// lib: 'src/components'
+		},
+		paths: {
+			// Configure for reverse proxy deployment
+			relative: false
+		},
+		csrf: {
+			// Allow requests from OAuth proxy
+			checkOrigin: false
 		}
 	}
 };

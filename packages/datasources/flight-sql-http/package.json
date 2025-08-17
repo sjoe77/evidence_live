@@ -3,14 +3,16 @@
   "version": "1.0.0",
   "description": "Flight SQL HTTP datasource for Evidence",
   "main": "index.cjs",
-  "type": "commonjs",
   "dependencies": {
     "@evidence-dev/db-commons": "workspace:*",
     "node-fetch": "^2.6.7"
   },
   "evidence": {
     "datasources": [
-      "flight-sql-http"
+      [
+        "flight-sql-http",
+        "fsql"
+      ]
     ],
     "icon": "Database"
   },

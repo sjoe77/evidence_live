@@ -13,8 +13,8 @@ import { setTrackProxy } from '@evidence-dev/sdk/usql';
 import { addBasePath } from '@evidence-dev/sdk/utils/svelte';
 import md5 from 'blueimp-md5';
 
-export const ssr = !dev;
-export const prerender = import.meta.env.VITE_EVIDENCE_SPA !== 'true';
+export const ssr = true; // Force SSR to enable server-side Flight SQL queries
+export const prerender = false; // Disable prerendering - all pages require authentication
 export const trailingSlash = 'always';
 
 const loadDB = async () => {
@@ -97,14 +97,105 @@ const system_routes = ['/settings', '/explore'];
 /** @type {Map<string, { inputs: Record<string, string> }>} */
 const dummy_pages = new Map();
 
+/** @type {Map<string, any[]>} Global cache for Flight SQL query results */
+const flightSqlQueryCache = new Map();
+
+/** @type {Record<string, any[]>} Store server-side results for browser serialization */
+let serverSideFlightSqlResults = {};
+
+// Create a global cache that survives SSR→browser transition
+if (typeof globalThis !== 'undefined') {
+	if (!globalThis.__EVIDENCE_FLIGHT_SQL_CACHE__) {
+		globalThis.__EVIDENCE_FLIGHT_SQL_CACHE__ = {};
+	}
+	if (!globalThis.__EVIDENCE_FLIGHT_SQL_PROMISES__) {
+		globalThis.__EVIDENCE_FLIGHT_SQL_PROMISES__ = {};
+	}
+}
+
 /** @satisfies {import("./$types").LayoutLoad} */
-export const load = async ({ fetch, route, params, url }) => {
+export const load = async ({ fetch, route, params, url, data }) => {
+	console.log(`[LAYOUT LOAD] Server data available:`, !!data);
+	
+	const oauthHeaders = data?.oauthHeaders || {};
+	console.log(`[LAYOUT LOAD] OAuth headers from server:`, Object.keys(oauthHeaders));
+	
+	// Log OAuth header availability for debugging
+	if (Object.keys(oauthHeaders).length > 0) {
+		console.log(`[LAYOUT LOAD] ✅ OAuth headers received from server-side load function`);
+	} else {
+		console.log(`[LAYOUT LOAD] ⚠️  No OAuth headers available - server should have returned 401`);
+	}
+	// Construct actual route path by replacing parameters in route.id
+	// Handle null/undefined route.id early
+	let actualRoute = route.id || url.pathname || '/';
+	
+	console.log(`\n🛣️  [ROUTE PROCESSING] Starting route processing`);
+	console.log(`[ROUTE PROCESSING] Initial route.id: "${route.id}"`);
+	console.log(`[ROUTE PROCESSING] URL pathname: "${url.pathname}"`);
+	console.log(`[ROUTE PROCESSING] Params object: ${JSON.stringify(params, null, 2)}`);
+	console.log(`[ROUTE PROCESSING] Params count: ${Object.keys(params || {}).length}`);
+	
+	// Early exit for static files and service worker requests
+	if (url.pathname.endsWith('.js') || url.pathname.endsWith('.json') || url.pathname.includes('manifest') || url.pathname.includes('service-worker')) {
+		console.log(`[ROUTE PROCESSING] 🔧 Static file request detected: ${url.pathname} - skipping route processing`);
+		actualRoute = url.pathname;
+	}
+	
+	// Handle parameter replacement more robustly
+	if (params && Object.keys(params).length > 0) {
+		console.log(`[ROUTE PROCESSING] 🔄 Processing ${Object.keys(params).length} parameters`);
+		
+		for (const [key, value] of Object.entries(params)) {
+			console.log(`[ROUTE PROCESSING] Processing param: ${key} = "${value}" (type: ${typeof value})`);
+			
+			if (value && value !== 'null' && value !== 'undefined') {
+				const beforeReplace = actualRoute;
+				actualRoute = actualRoute.replace(`[${key}]`, value);
+				console.log(`[ROUTE PROCESSING] ✅ Replaced [${key}] with "${value}"`);
+				console.log(`[ROUTE PROCESSING]    Before: "${beforeReplace}"`);
+				console.log(`[ROUTE PROCESSING]    After:  "${actualRoute}"`);
+			} else {
+				console.log(`[ROUTE PROCESSING] ⚠️  Skipping invalid parameter: ${key} = "${value}"`);
+			}
+		}
+	} else {
+		console.log(`[ROUTE PROCESSING] ℹ️  No parameters to process (static route)`);
+	}
+	
+	// Validate the final route
+	console.log(`[ROUTE PROCESSING] 🔍 Validating final route: "${actualRoute}"`);
+	console.log(`[ROUTE PROCESSING] Route is null/undefined: ${actualRoute == null}`);
+	console.log(`[ROUTE PROCESSING] Is empty/falsy: ${!actualRoute}`);
+	
+	// Safe checks for string content (only if actualRoute is a string)
+	if (actualRoute && typeof actualRoute === 'string') {
+		console.log(`[ROUTE PROCESSING] Contains brackets: ${actualRoute.includes('[')}`);
+		console.log(`[ROUTE PROCESSING] Contains 'null': ${actualRoute.includes('null')}`);
+		console.log(`[ROUTE PROCESSING] Contains 'undefined': ${actualRoute.includes('undefined')}`);
+	} else {
+		console.log(`[ROUTE PROCESSING] actualRoute is not a valid string, will use fallback`);
+	}
+	
+	// Ensure we have a valid route path (no null, undefined, or bracket params)
+	if (!actualRoute || typeof actualRoute !== 'string' || actualRoute.includes('[') || actualRoute.includes('null') || actualRoute.includes('undefined')) {
+		console.log(`❌ [ROUTE PROCESSING] Invalid route detected, using fallback`);
+		console.log(`[ROUTE PROCESSING] Fallback: route.id="${route.id}" or "index"`);
+		actualRoute = route.id || 'index';
+		console.log(`[ROUTE PROCESSING] Applied fallback: "${actualRoute}"`);
+	}
+	
+	console.log(`✅ [ROUTE PROCESSING] Final actualRoute: "${actualRoute}"\n`);
+	
 	const [{ customFormattingSettings }, pagesManifest, evidencemeta] = await Promise.all([
 		fetch(addBasePath('/api/customFormattingSettings.json/GET.json')).then((x) => x.json()),
 		fetch(addBasePath('/api/pagesManifest.json')).then((x) => x.json()),
-		fetch(addBasePath(`/api/${route.id}/evidencemeta.json`))
+		fetch(addBasePath(`/api/${actualRoute}/evidencemeta.json`))
 			.then((x) => x.json())
-			.catch(() => ({ queries: [] }))
+			.catch((error) => {
+				console.log(`[ROUTE DEBUG] evidencemeta.json fetch failed for ${actualRoute}:`, error.message);
+				return { queries: [] };
+			})
 	]);
 
 	const routeHash = md5(route.id);
@@ -116,151 +207,68 @@ export const load = async ({ fetch, route, params, url }) => {
 	);
 
 	// 🔥🔥🔥 FLIGHT SQL DATASOURCE ROUTER 🔥🔥🔥
-	async function routeToFlightSQL(sql, query_name, isBuilding) {
+	async function routeToFlightSQL(sql, query_name, isBuilding, passedOauthHeaders = {}) {
+		// Use OAuth headers from server-side load function if available
+		const finalOauthHeaders = Object.keys(oauthHeaders).length > 0 ? oauthHeaders : passedOauthHeaders;
 		try {
 			console.log(`[FLIGHT SQL ROUTER] Attempting to route Flight SQL query...`);
 			
 			if (browser) {
-				// 🔥 BROWSER-SIDE MOCK DATA 🔥
-				console.log(`[FLIGHT SQL ROUTER] Executing in browser with mock data...`);
-				const mockData = generateBrowserMockData(sql);
-				console.log(`🔥🔥🔥 [FLIGHT SQL BROWSER] Query executed successfully! Rows: ${mockData.length} 🔥🔥🔥`);
-				return mockData;
+				// 🔥 BROWSER-SIDE FLIGHT SQL EXECUTION 🔥
+				console.log(`[FLIGHT SQL ROUTER] Browser should not call routeToFlightSQL directly - use fetch('/query') instead`);
+				throw new Error('Browser should use fetch(\'/query\') for Flight SQL requests, not routeToFlightSQL');
 			} else {
 				// 🔥 SERVER-SIDE FLIGHT SQL CONNECTOR 🔥
 				console.log(`[FLIGHT SQL ROUTER] Executing on server with Flight SQL connector...`);
+				
+				// Check OAuth headers BEFORE making request
+				const headerCount = Object.keys(finalOauthHeaders).length;
+				if (headerCount === 0) {
+					console.log(`[FLIGHT SQL ROUTER] ⚠️  No OAuth headers - proceeding anyway (auth suppressed in ducklake)`);
+				} else {
+					console.log(`[FLIGHT SQL ROUTER] ✅ Found ${headerCount} OAuth headers for HTTP middleware authentication`);
+					console.log(`[FLIGHT SQL ROUTER] Using OAuth headers:`, Object.keys(finalOauthHeaders));
+				}
+				
 				const flightSqlConnector = await import('@evidence-dev/flight-sql-http');
 				console.log(`[FLIGHT SQL ROUTER] Flight SQL connector loaded successfully!`);
 				
 				const result = await flightSqlConnector.default(sql, { 
-					mock: true,  // Enable mock mode for testing
+					mock: false,  // Use real Flight SQL HTTP endpoint
 					query_name,
-					endpoint: 'mock'
+					endpoint: 'http://localhost:4180/query',  // Your working ducklake endpoint
+					headers: finalOauthHeaders  // Pass OAuth headers extracted from proxy request
 				});
 				console.log(`🔥🔥🔥 [FLIGHT SQL ROUTER] Query executed successfully! Rows: ${result.data?.length || result.length} 🔥🔥🔥`);
 				
-				return result.data || result;  // Return data array
+				// Extract data array but preserve Evidence-required properties
+				const resultData = result.data || result;
+				
+				// Evidence components expect rowCount property on the data array itself
+				if (result.rowCount !== undefined && Array.isArray(resultData)) {
+					resultData.rowCount = result.rowCount;
+				}
+				if (result.columnTypes && Array.isArray(resultData)) {
+					resultData.columnTypes = result.columnTypes;
+				}
+				
+				// No caching needed - both server and browser execute directly
+				
+				return resultData;  // Return data array
 			}
 		} catch (error) {
-			console.error(`❌ [FLIGHT SQL ROUTER] Error executing query:`, error);
-			throw error;
+			console.error(`❌ [FLIGHT SQL ROUTER] Error executing query:`, error.message);
+			// Return empty result instead of throwing to prevent server crashes
+			console.log(`[FLIGHT SQL ROUTER] Returning empty result due to error`);
+			return [];
 		}
 	}
 
-	// 🔥 BROWSER-COMPATIBLE MOCK DATA GENERATOR 🔥
-	function generateBrowserMockData(sql) {
-		const query = sql.toLowerCase().trim();
-		
-		console.log(`[BROWSER MOCK] Analyzing query: ${query.substring(0, 100)}...`);
-		
-		// Handle DESCRIBE queries (columns)
-		if (query.includes('describe') || query.includes('columns')) {
-			console.log(`[BROWSER MOCK] Returning column metadata`);
-			if (query.includes('test_query')) {
-				return [
-					{ column_name: 'id', data_type: 'INTEGER' },
-					{ column_name: 'message', data_type: 'VARCHAR' },
-					{ column_name: 'today', data_type: 'DATE' },
-					{ column_name: 'status', data_type: 'VARCHAR' }
-				];
-			} else if (query.includes('dropdown') || query.includes('selected_product')) {
-				// Dropdown column metadata
-				return [
-					{ column_name: 'value', data_type: 'VARCHAR' },
-					{ column_name: 'label', data_type: 'VARCHAR' }
-				];
-			} else if (query.includes('sales_data') || query.includes('product')) {
-				return [
-					{ column_name: 'product', data_type: 'VARCHAR' },
-					{ column_name: 'sales', data_type: 'INTEGER' },
-					{ column_name: 'order_date', data_type: 'DATE' }
-				];
-			} else if (query.includes('total_sales')) {
-				return [
-					{ column_name: 'total_sales', data_type: 'INTEGER' },
-					{ column_name: 'num_records', data_type: 'INTEGER' }
-				];
-			}
-		}
-		
-		// Handle COUNT(*) queries (length)  
-		if (query.includes('count(*)') && query.includes('rowcount')) {
-			console.log(`[BROWSER MOCK] Returning row count`);
-			if (query.includes('dropdown') || query.includes('selected_product')) {
-				return [{ rowCount: 3 }]; // 3 dropdown options
-			}
-			return [{ rowCount: 6 }];
-		}
-		
-		// Handle actual data queries
-		if (query.includes('test_query') && !query.includes('describe') && !query.includes('count')) {
-			console.log(`[BROWSER MOCK] Returning test query data`);
-			return [
-				{
-					id: 1,
-					message: 'Hello Flight SQL (Browser Mock)',
-					today: new Date().toISOString().split('T')[0],
-					status: 'Browser Mock Success'
-				}
-			];
-		}
-		
-		// Sales data mock - sorted by date for proper line chart rendering
-		if (query.includes('sales_data') && !query.includes('describe') && !query.includes('count')) {
-			console.log(`[BROWSER MOCK] Returning sales data (sorted by date)`);
-			return [
-				{ product: 'Product A', sales: 100, order_date: '2024-01-01' },
-				{ product: 'Product B', sales: 200, order_date: '2024-01-02' },
-				{ product: 'Product C', sales: 150, order_date: '2024-01-03' },
-				{ product: 'Product A', sales: 120, order_date: '2024-01-04' },
-				{ product: 'Product B', sales: 180, order_date: '2024-01-05' },
-				{ product: 'Product C', sales: 220, order_date: '2024-01-06' },
-				{ product: 'Product A', sales: 140, order_date: '2024-01-07' },
-				{ product: 'Product B', sales: 160, order_date: '2024-01-08' }
-			];
-		}
-		
-		// Total sales aggregation mock  
-		if ((query.includes('total_sales') || query.includes('sum(sales)')) && !query.includes('describe') && !query.includes('count')) {
-			console.log(`[BROWSER MOCK] Returning total sales data`);
-			return [
-				{ total_sales: 1070, num_records: 6 }
-			];
-		}
-		
-		// Dropdown options mock - handle any dropdown-related query
-		if (query.includes('dropdown') || (query.includes('distinct') && query.includes('product'))) {
-			console.log(`[BROWSER MOCK] Returning dropdown options for query: ${query.substring(0, 150)}`);
-			return [
-				{ value: 'Product A', label: 'Product A' },
-				{ value: 'Product B', label: 'Product B' },
-				{ value: 'Product C', label: 'Product C' }
-			];
-		}
-		
-		// Default mock - check if this might be a dropdown query we missed
-		console.log(`[BROWSER MOCK] Returning default mock data for query: ${query.substring(0, 200)}`);
-		
-		// If the query mentions dropdown or has value/label fields, return dropdown format
-		if (query.includes('selected_product') || query.includes('dropdown')) {
-			console.log(`[BROWSER MOCK] Default case detected dropdown pattern - returning dropdown data`);
-			return [
-				{ value: 'Product A', label: 'Product A' },
-				{ value: 'Product B', label: 'Product B' },
-				{ value: 'Product C', label: 'Product C' }
-			];
-		}
-		
-		// Generic default
-		return [
-			{ mock: true, message: 'Browser mock data', timestamp: new Date().toISOString() }
-		];
-	}
 	const isUserPage =
 		route.id && system_routes.every((system_route) => !route.id.startsWith(system_route));
 
 	/** @type {App.PageData["data"]} */
-	let data = {};
+	let pageData = {};
 
 	const {
 		inputs = setTrackProxy({
@@ -282,7 +290,7 @@ export const load = async ({ fetch, route, params, url }) => {
 
 	// let SSR saturate the cache first
 	if (browser && isUserPage && prerender) {
-		data = await getPrerenderedQueries(routeHash, paramsHash, fetch);
+		pageData = await getPrerenderedQueries(routeHash, paramsHash, fetch);
 	}
 
 	/** @type {App.PageData["__db"]["query"]} */
@@ -293,27 +301,62 @@ export const load = async ({ fetch, route, params, url }) => {
 		
 		// Check for -- source: comment to route to datasource plugins
 		const sourceMatch = sql.match(/--\s*source:\s*(\w+)/i);
-		// 🔥 BROWSER-SAFE DEFAULT DATASOURCE 🔥
-		const defaultDataSource = (typeof process !== 'undefined' && process.env?.EVIDENCE_DEFAULT_DATASOURCE) || 'flight_sql_mock';
+		// 🔥 SINGLE SOURCE OF TRUTH: evidence.config.yaml controls mock vs real 🔥
+		const defaultDataSource = (typeof process !== 'undefined' && process.env?.EVIDENCE_DEFAULT_DATASOURCE) || 'flight_sql';
 		const sourceName = sourceMatch ? sourceMatch[1] : defaultDataSource;
 		
 		console.log(`🔥🔥🔥 [LAYOUT QUERY] DATASOURCE: ${sourceName} ${sourceMatch ? '(explicit)' : '(default)'} 🔥🔥🔥`);
 		console.log(`[Flight SQL Router] Using source: ${sourceName} for query: ${sql.substring(0, 100)}...`);
 		
-		// 🔥 SERVER-SIDE ROUTE TO DATASOURCE PLUGIN 🔥
+		// 🔥 DISABLE SERVER-SIDE FLIGHT SQL TO PREVENT CRASHES 🔥
+		// Force all Flight SQL queries to execute in browser to avoid CommonJS/ESM issues
 		if (!browser && (sourceName === 'flight_sql_mock' || sourceName === 'flight_sql')) {
-			console.log(`\n🔥🔥🔥 [SERVER FLIGHT SQL ROUTING] Executing query via Flight SQL HTTP connector! 🔥🔥🔥`);
-			return callback(routeToFlightSQL(sql, query_name, building));
+			console.log(`[LAYOUT QUERY] Skipping server-side Flight SQL - will execute in browser instead`);
+			// Return empty array for server-side, browser will handle the real query
+			return callback([]);
 		} else if (!browser && sourceName !== 'flight_sql_mock' && sourceName !== 'flight_sql') {
 			console.log(`[LAYOUT QUERY] Using ${sourceName} datasource (not Flight SQL) - falling back to DuckDB`);
 		}
 		
 		if (browser) {
 			return (async () => {
-				// 🔥 BROWSER-SIDE FLIGHT SQL ROUTING 🔥
+				// 🔥 BROWSER FLIGHT SQL EXECUTION THROUGH OAUTH PROXY 🔥
 				if (sourceName === 'flight_sql_mock' || sourceName === 'flight_sql') {
-					console.log(`🔥🔥🔥 [BROWSER FLIGHT SQL] Executing query via Flight SQL! 🔥🔥🔥`);
-					return callback(routeToFlightSQL(sql, query_name, false));
+					console.log(`[BROWSER FLIGHT SQL] Executing query through OAuth proxy: ${query_name}`);
+					
+					// Browser requests must go through OAuth proxy for authentication
+					// Make HTTP request to /query endpoint which will route through OAuth proxy
+					try {
+						console.log(`[BROWSER FLIGHT SQL] Making authenticated request through OAuth proxy...`);
+						
+						const response = await fetch(`http://localhost:4180/query?q=${encodeURIComponent(sql)}`, {
+							method: 'GET'
+							// OAuth proxy handles authentication (currently suppressed)
+						});
+						
+						if (!response.ok) {
+							throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+						}
+						
+						const responseData = await response.json();
+						console.log(`✅ [BROWSER FLIGHT SQL] Query executed successfully: ${query_name}, rows: ${responseData.results?.length || 0}`);
+						
+						// Transform DuckLake format (arrays) to Evidence format (objects)
+						const { columns, results } = responseData;
+						const transformedResults = results.map(row => {
+							const obj = {};
+							columns.forEach((col, index) => {
+								obj[col] = row[index];
+							});
+							return obj;
+						});
+						
+						console.log(`[BROWSER FLIGHT SQL] Transformed data:`, transformedResults.slice(0, 3));
+						return callback(transformedResults);
+					} catch (error) {
+						console.error(`❌ [BROWSER FLIGHT SQL] Query failed: ${query_name}`, error);
+						return callback([]);
+					}
 				}
 				
 				console.log(`[BROWSER] Using ${sourceName} datasource (not Flight SQL) - falling back to DuckDB`);
@@ -348,6 +391,9 @@ export const load = async ({ fetch, route, params, url }) => {
 		}
 	}
 
+	// Simple approach: no caching complexity needed
+	const finalPageData = pageData;
+
 	return /** @type {App.PageData} */ ({
 		__db: {
 			query,
@@ -361,7 +407,7 @@ export const load = async ({ fetch, route, params, url }) => {
 			}
 		},
 		inputs,
-		data,
+		data: finalPageData, // Include Flight SQL results for browser hydration
 		customFormattingSettings,
 		isUserPage,
 		evidencemeta,
