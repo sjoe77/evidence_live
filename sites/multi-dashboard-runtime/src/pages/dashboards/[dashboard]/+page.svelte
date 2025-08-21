@@ -1,27 +1,20 @@
 <script>
 	import { BarChart, BigValue, DataTable, Dropdown, DropdownOption, TextInput, DateRange, Checkbox } from '@evidence-dev/core-components';
-	import { onMount } from 'svelte';
-	import { writable } from 'svelte/store';
+	import { onMount, setContext } from 'svelte';
+	import { writable, get } from 'svelte/store';
+	import { getInputContext, ensureInputContext, getInputSetter, InputStoreKey } from '@evidence-dev/sdk/utils/svelte';
+	import { buildReactiveInputQuery } from '@evidence-dev/component-utilities/buildQuery';
+	import { duckdbSerialize } from '@evidence-dev/sdk/usql';
 	
 	/** @type {import('./$types').PageData} */
 	export let data;
 	
-	// Create Evidence-style inputs store for form components
-	const inputValues = writable({});
+	// Initialize Evidence input context system
+	const inputStore = writable({});
+	ensureInputContext(inputStore);
+	const inputs = getInputContext();
 	
-	// Create Evidence inputs interface that components expect
-	const inputs = new Proxy({}, {
-		get(target, prop) {
-			return {
-				value: writable(null),
-				subscribe: (callback) => {
-					return inputValues.subscribe(values => {
-						callback(values[prop] || null);
-					});
-				}
-			};
-		}
-	});
+	// Evidence objects are used directly in template evaluation - no conversion needed
 	
 	// Re-execute queries when input values change (simple approach - re-run all queries)
 	let lastMarkdownContent = '';
@@ -29,64 +22,95 @@
 	let sqlQueries = {};
 	let components = [];
 	
-	inputValues.subscribe(values => {
-		if (typeof window !== 'undefined') {
-			// Update input value displays
+	// Evidence components handle their own instances automatically
+	
+	// Evidence handles dropdown integration automatically through the component
+	// No manual setup needed when using real Evidence Dropdown component
+	
+	// Track previous input values to detect changes
+	let previousInputValues = {};
+	
+	// Subscribe to Evidence input changes with change detection
+	inputs.subscribe(values => {
+		if (typeof window !== 'undefined' && dashboardData && lastMarkdownContent) {
+			// Detect specific input changes and re-execute only dependent queries
 			Object.keys(values).forEach(inputName => {
-				const displays = document.querySelectorAll(`[data-input="${inputName}"]`);
-				displays.forEach(display => {
-					display.textContent = values[inputName] || 'None selected';
-				});
+				const currentValue = values[inputName];
+				const previousValue = previousInputValues[inputName];
+				
+				// Check if this specific input actually changed
+				const hasChanged = JSON.stringify(currentValue) !== JSON.stringify(previousValue);
+				
+				if (hasChanged) {
+					console.log(`[Evidence] Input ${inputName} changed:`, { from: previousValue, to: currentValue });
+					reExecuteDependentQueries(inputName, lastMarkdownContent);
+				}
 			});
 			
-			// Re-execute all queries with new input values (only if dashboard is already loaded)
-			if (dashboardData && lastMarkdownContent) {
-				console.log('[Evidence] Input values changed, re-executing queries...');
-				reExecuteAllQueries(lastMarkdownContent);
-			}
+			// Update previous values for next comparison
+			previousInputValues = { ...values };
 		}
 	});
 	
-	// Function to re-execute all queries (called when inputs change)
-	function reExecuteAllQueries(markdownContent) {
-		const sqlBlocks = markdownContent.match(/```sql\s+(\w+)\n([\s\S]*?)```/g) || [];
+	// Track query dependencies to prevent excessive re-execution
+	let queryDependencies = {}; // queryName -> [inputNames]
+	
+	// Function to detect which inputs a query depends on
+	function analyzeQueryDependencies(queryName, sqlCode) {
+		const dependencies = [];
 		
-		// Create new sqlQueries object to trigger Svelte reactivity
-		const newSqlQueries = { ...sqlQueries };
+		// Evidence's pattern for detecting input dependencies
+		const inputPattern = /\$\{\s*inputs\s*\.\s*(\w+)[\.\w]*\s*.*?\}/g;
+		let match;
 		
-		sqlBlocks.forEach(block => {
-			const match = block.match(/```sql\s+(\w+)\n([\s\S]*?)```/);
-			if (match) {
-				const queryName = match[1];
-				const sqlCode = match[2].trim();
-				
-				// Only re-execute queries that Evidence components actually reference
-				if (dashboardData.queryNames.includes(queryName)) {
-					console.log(`[Evidence] Re-executing query: ${queryName}`);
-					// Keep the old promise while the new one resolves to prevent chart disappearing
-					const oldPromise = sqlQueries[queryName];
-					const newPromise = executeQuery(queryName, sqlCode);
-					
-					// Update immediately with new promise
-					newSqlQueries[queryName] = newPromise;
-					
-					// Log when new promise completes
-					newPromise.then(result => {
-						console.log(`[Evidence] Re-executed query ${queryName} completed with ${result.length} rows`);
-					}).catch(error => {
-						console.error(`[Evidence] Re-executed query ${queryName} failed:`, error);
-						// Fallback to old promise if new one fails
-						newSqlQueries[queryName] = oldPromise;
-						sqlQueries = { ...newSqlQueries };
-					});
-				}
+		while ((match = inputPattern.exec(sqlCode)) !== null) {
+			const inputName = match[1];
+			if (!dependencies.includes(inputName)) {
+				dependencies.push(inputName);
 			}
-		});
+		}
 		
-		// Add small delay to let DOM settle before triggering chart re-render
-		setTimeout(() => {
+		queryDependencies[queryName] = dependencies;
+		console.log(`[Evidence] Query ${queryName} depends on inputs:`, dependencies);
+		return dependencies;
+	}
+	
+	// Debounced function to re-execute only dependent queries
+	let reExecuteTimeout = null;
+	function reExecuteDependentQueries(changedInputName, markdownContent) {
+		// Clear existing timeout to debounce rapid changes
+		if (reExecuteTimeout) {
+			clearTimeout(reExecuteTimeout);
+		}
+		
+		reExecuteTimeout = setTimeout(() => {
+			console.log(`[Evidence] Input ${changedInputName} changed, finding dependent queries...`);
+			
+			const sqlBlocks = markdownContent.match(/```sql\s+(\w+)\n([\s\S]*?)```/g) || [];
+			const newSqlQueries = { ...sqlQueries };
+			
+			sqlBlocks.forEach(block => {
+				const match = block.match(/```sql\s+(\w+)\n([\s\S]*?)```/);
+				if (match) {
+					const queryName = match[1];
+					const sqlCode = match[2].trim();
+					
+					// Analyze dependencies if not already done
+					if (!queryDependencies[queryName]) {
+						analyzeQueryDependencies(queryName, sqlCode);
+					}
+					
+					// Only re-execute if this query depends on the changed input
+					const dependencies = queryDependencies[queryName] || [];
+					if (dependencies.includes(changedInputName) && dashboardData.queryNames.includes(queryName)) {
+						console.log(`[Evidence] Re-executing dependent query: ${queryName}`);
+						newSqlQueries[queryName] = executeQuery(queryName, sqlCode);
+					}
+				}
+			});
+			
 			sqlQueries = newSqlQueries;
-		}, 100);
+		}, 200); // 200ms debounce
 	}
 	
 	// Debug the data being passed
@@ -103,47 +127,55 @@
 		return Promise.resolve([]);
 	});
 	
-	// Function to interpolate template literals in SQL
+	// Evidence-compatible SQL template evaluation using JavaScript template literals
 	function interpolateSQL(sql, inputValues) {
-		let interpolated = sql;
-		
-		// Handle conditional expressions properly
-		// Look for ${inputs.input_name.value ? `AND condition` : ''} patterns
-		const conditionalPattern = /\$\{inputs\.(\w+)\.value\s*\?\s*`([^`]+)`\s*:\s*[^}]*\}/g;
-		interpolated = interpolated.replace(conditionalPattern, (match, inputName, condition) => {
-			const value = inputValues[inputName];
-			if (value !== undefined && value !== null && value !== '') {
-				console.log(`[SQL Interpolation] Applying condition for ${inputName}='${value}': ${condition}`);
-				// Replace ${inputs.input_name.value} within the condition with the actual value (no extra quotes)
-				return condition.replace(/\$\{inputs\.\w+\.value\}/g, value);
-			} else {
-				console.log(`[SQL Interpolation] Removing condition for ${inputName} (no value selected)`);
-				return ''; // Remove the entire condition when no value
-			}
-		});
-		
-		// Handle simple ${inputs.input_name.value} replacements
-		const simplePattern = /\$\{inputs\.(\w+)\.value\}/g;
-		interpolated = interpolated.replace(simplePattern, (match, inputName) => {
-			const value = inputValues[inputName];
-			if (value !== undefined && value !== null && value !== '') {
-				console.log(`[SQL Interpolation] Replacing ${match} with '${value}'`);
-				return `'${value}'`;
-			} else {
-				console.log(`[SQL Interpolation] ${match} is empty, using NULL`);
-				return 'NULL';
-			}
-		});
-		
-		console.log(`[SQL Interpolation] Original: ${sql}`);
-		console.log(`[SQL Interpolation] Interpolated: ${interpolated}`);
-		
-		return interpolated;
+		try {
+			// Debug the Evidence input objects structure
+			console.log(`[EVIDENCE SQL] Evidence input objects:`, inputValues);
+			Object.keys(inputValues).forEach(key => {
+				const inputObj = inputValues[key];
+				console.log(`[EVIDENCE SQL] Input ${key}:`, {
+					value: inputObj?.value,
+					label: inputObj?.label,
+					toString: typeof inputObj?.toString,
+					hasValueProperty: 'value' in (inputObj || {}),
+					fullObject: inputObj
+				});
+			});
+			
+			// Create a safe execution context with the inputs object
+			const context = {
+				inputs: inputValues
+			};
+			
+			// Convert template string to evaluable JavaScript
+			// Replace ${...} with proper template literal syntax
+			const templateCode = `\`${sql}\``;
+			
+			console.log(`[EVIDENCE SQL] Template code: ${templateCode}`);
+			console.log(`[EVIDENCE SQL] Context inputs:`, Object.keys(inputValues));
+			
+			// Create a function that evaluates the template in the context
+			const evaluateTemplate = new Function('inputs', `return ${templateCode}`);
+			const result = evaluateTemplate(context.inputs);
+			
+			console.log(`[EVIDENCE SQL] Original: ${sql}`);
+			console.log(`[EVIDENCE SQL] Evaluated: ${result}`);
+			
+			return result;
+		} catch (error) {
+			console.error(`[EVIDENCE SQL] Template evaluation error:`, error);
+			console.error(`[EVIDENCE SQL] Template: ${sql}`);
+			console.error(`[EVIDENCE SQL] Inputs:`, inputValues);
+			
+			// Fallback to original SQL on error
+			return sql;
+		}
 	}
 
 	// Execute queries with template interpolation
 	function executeQuery(queryName, sqlCode) {
-		const currentInputValues = $inputValues;
+		const currentInputValues = get(inputs); // Use Evidence objects directly, not simplified values
 		const interpolatedSQL = interpolateSQL(sqlCode, currentInputValues);
 		
 		console.log(`[Evidence] Executing query: ${queryName}`);
@@ -198,6 +230,7 @@
 	$: dataReady = data && typeof data === 'object';
 	$: pageTitle = dataReady ? `Evidence - ${data.dashboard || 'Loading...'}` : 'Evidence - Loading...';
 	
+	
 	// Component registry for dynamic loading
 	const componentMap = {
 		'BarChart': BarChart,
@@ -247,20 +280,25 @@
 							
 							// Only execute queries that Evidence components actually reference
 							if (dashboardData.queryNames.includes(queryName)) {
+								// Analyze query dependencies for future optimization
+								analyzeQueryDependencies(queryName, sqlCode);
+								
+								// Execute the query
 								sqlQueries[queryName] = executeQuery(queryName, sqlCode);
 							}
 						}
 					});
 				}
 
-				// After all queries complete, replace placeholders with actual components
-				console.log('[Runtime Evidence] Components array for replacement:', components);
-				console.log('[Runtime Evidence] Non-QueryViewer components:', components.filter(c => c.name !== 'QueryViewer'));
-				setTimeout(() => {
-					replaceComponentPlaceholders();
-					// Clean up any remaining undefined text in the DOM
-					cleanupUndefinedText();
-				}, 2000);
+				// Queries execute automatically when components render
+				const allQueryPromises = Object.values(sqlQueries);
+				console.log(`[Runtime Evidence] Started ${allQueryPromises.length} queries, components will render when data is available`);
+				
+				Promise.allSettled(allQueryPromises).then(results => {
+					console.log(`[Runtime Evidence] All queries completed:`, results.map(r => r.status));
+				}).catch(error => {
+					console.error('[Runtime Evidence] Error in query execution:', error);
+				});
 				
 			} catch (error) {
 				console.error(`[Runtime Evidence] Error processing component:`, error);
@@ -268,69 +306,6 @@
 		}
 	});
 
-	// Function to replace placeholder divs with actual Svelte components
-	function replaceComponentPlaceholders() {
-		if (typeof window === 'undefined') return;
-
-		console.log(`[Runtime Evidence] Replacing component placeholders...`);
-		
-		const placeholders = document.querySelectorAll('.evidence-component-placeholder');
-		console.log(`[Runtime Evidence] Found ${placeholders.length} placeholders`);
-
-		placeholders.forEach((placeholder) => {
-			const componentIndex = placeholder.getAttribute('data-component-index');
-			const replacementDiv = document.getElementById(`component-replacement-${componentIndex}`);
-			
-			console.log(`[Runtime Evidence] Looking for replacement div: component-replacement-${componentIndex}`);
-			console.log(`[Runtime Evidence] ReplacementDiv found:`, !!replacementDiv);
-			
-			if (replacementDiv) {
-				console.log(`[Runtime Evidence] Found replacement, swapping placeholder ${componentIndex}`);
-				// Replace the placeholder with the actual component
-				try {
-					replacementDiv.style.display = 'block';
-					placeholder.parentNode.replaceChild(replacementDiv, placeholder);
-				} catch (error) {
-					console.error(`[Runtime Evidence] Error swapping placeholder ${componentIndex}:`, error);
-					console.error(`[Runtime Evidence] replacementDiv:`, replacementDiv);
-					console.error(`[Runtime Evidence] placeholder:`, placeholder);
-				}
-			} else {
-				console.warn(`[Runtime Evidence] No replacement found for placeholder ${componentIndex}`);
-			}
-		});
-	}
-
-	// Function to clean up any remaining undefined text in the DOM
-	function cleanupUndefinedText() {
-		if (typeof window === 'undefined') return;
-
-		console.log('[Runtime Evidence] Cleaning up undefined text from DOM...');
-		
-		// Get all text nodes and clean up undefined
-		const walker = document.createTreeWalker(
-			document.querySelector('.evidence-dashboard'),
-			NodeFilter.SHOW_TEXT,
-			null,
-			false
-		);
-
-		let textNode;
-		const nodesToFix = [];
-		
-		while (textNode = walker.nextNode()) {
-			if (textNode.textContent && textNode.textContent.includes('undefined')) {
-				nodesToFix.push(textNode);
-			}
-		}
-
-		console.log(`[Runtime Evidence] Found ${nodesToFix.length} text nodes with 'undefined'`);
-
-		nodesToFix.forEach(node => {
-			console.log(`[Runtime Evidence] Cleaning text: "${node.textContent.substring(0, 100)}"`);
-			node.textContent = node.textContent.replace(/undefined/g, '').replace(/\s{2,}/g, ' ').trim();
-		});
-	}
 </script>
 
 <svelte:head>
@@ -349,127 +324,142 @@
 		<p><strong>Dashboard file:</strong> <code>/dashboards/{data.dashboard}/+page.md</code></p>
 	</div>
 {:else if data.dashboardExists}
-	<!-- Render Evidence-processed content with components in their exact positions -->
+	<!-- Direct Evidence component rendering -->
 	<div class="evidence-dashboard">
-		{#if dashboardData && dashboardData.html}
-			{@html dashboardData.html}
-			{#if typeof window !== 'undefined'}
-				{setTimeout(() => {
-					// Immediate cleanup of undefined text
-					const dashboard = document.querySelector('.evidence-dashboard');
-					if (dashboard) {
-						dashboard.innerHTML = dashboard.innerHTML.replace(/undefined/g, '');
-					}
-				}, 100)}
-			{/if}
-		{:else}
-			<p>Loading dashboard content...</p>
-		{/if}
-	</div>
+		{#if data?.compiledComponent}
+			{@const parsedData = JSON.parse(data.compiledComponent)}
+			{@const parsedComponents = parsedData.components || []}
+			<!-- Render markdown structure with components inline -->
+			<h1 class="markdown" id="claims-analysis-dashboard---runtime-evidence-processing">
+				<a href="#claims-analysis-dashboard---runtime-evidence-processing">
+					Claims Analysis Dashboard - Runtime Evidence Processing
+				</a>
+			</h1>
+			
+			<h2 class="markdown" id="claims-status-overview---live-filtering-with-flight-sql">
+				<a href="#claims-status-overview---live-filtering-with-flight-sql">
+					Claims Status Overview - Live Filtering with Flight SQL
+				</a>
+			</h2>
 
-	<!-- Render actual components that will replace placeholders -->
-	{#each components.filter(c => c.name !== 'QueryViewer') as component, placeholderIndex}
-		{#if componentMap[component.name] && component.props && component.name !== 'Dropdown'}
-			<!-- Handle data-driven components (charts, tables) -->
-			{#if component.props.data && sqlQueries[component.props.data]}
-				{#await sqlQueries[component.props.data] then queryData}
-					{#if queryData && Array.isArray(queryData)}
-						<div id="component-replacement-{placeholderIndex}" style="display: none;" class="evidence-component-ready">
-							<!-- Debug: Log component data -->
-							{console.log(`[COMPONENT DEBUG] ${component.name} receiving data:`, queryData)}
-							{console.log(`[COMPONENT DEBUG] ${component.name} data length:`, queryData.length)}
-							{console.log(`[COMPONENT DEBUG] ${component.name} props:`, component.props)}
-							{console.log(`[COMPONENT DEBUG] ${component.name} first row keys:`, queryData[0] ? Object.keys(queryData[0]) : 'No data')}
-							{console.log(`[COMPONENT DEBUG] ${component.name} first row:`, queryData[0])}
+			<!-- Render components directly in their positions -->
+			{#each parsedComponents as component, componentIndex}
+				{#if component.name === 'Dropdown'}
+					<!-- Real Evidence Dropdown Component with child DropdownOptions -->
+					<svelte:component 
+						this={componentMap[component.name]} 
+						name={component.props.name}
+						data={undefined}
+					>
+						{#each component.props.dropdownOptions as option}
+							<svelte:component 
+								this={componentMap['DropdownOption']}
+								value={option.value || ""}
+								valueLabel={option.valueLabel || option.value || "No Label"}
+							/>
+						{/each}
+					</svelte:component>
+					
+					<!-- Debug: Show selected value -->
+					{#if $inputs[component.props.name]}
+						<div class="selected-value">
+							<strong>Selected</strong>: {$inputs[component.props.name]?.label || $inputs[component.props.name]?.value || 'None'}
+						</div>
+					{/if}
+
+				{:else if component.name === 'BigValue' && component.props?.data && sqlQueries[component.props.data]}
+					<!-- Evidence BigValue Component -->
+					{#await sqlQueries[component.props.data] then queryData}
+						{#if queryData && Array.isArray(queryData) && queryData.length > 0}
 							<svelte:component 
 								this={componentMap[component.name]} 
 								data={queryData}
 								value={component.props?.value}
+								title={component.props?.title}
+								fmt={component.props?.fmt}
+							/>
+						{:else}
+							<div class="evidence-debug">
+								<p>BigValue: Dataset is empty or loading...</p>
+								<p>Query: {component.props.data}</p>
+							</div>
+						{/if}
+					{/await}
+
+				{:else if component.name === 'DataTable' && component.props?.data && sqlQueries[component.props.data]}
+					<!-- Evidence DataTable Component -->
+					<h2 class="markdown" id="claims-data-table">
+						<a href="#claims-data-table">Claims Data Table</a>
+					</h2>
+					{#await sqlQueries[component.props.data] then queryData}
+						{#if queryData && Array.isArray(queryData) && queryData.length > 0}
+							<svelte:component 
+								this={componentMap[component.name]} 
+								data={queryData}
+								title={component.props?.title}
+							/>
+						{:else}
+							<div class="evidence-debug">
+								<p>DataTable: Dataset is empty or loading...</p>
+								<p>Query: {component.props.data}</p>
+							</div>
+						{/if}
+					{/await}
+
+				{:else if component.name === 'BarChart' && component.props?.data && sqlQueries[component.props.data]}
+					<!-- Evidence BarChart Component -->
+					{#await sqlQueries[component.props.data] then queryData}
+						{#if queryData && Array.isArray(queryData) && queryData.length > 0}
+							<svelte:component 
+								this={componentMap[component.name]} 
+								data={queryData}
 								x={component.props?.x}
 								y={component.props?.y}
 								title={component.props?.title}
 								subtitle={component.props?.subtitle}
-								fmt={component.props?.fmt}
 							/>
-						</div>
-					{:else}
-						<div id="component-replacement-{placeholderIndex}" style="display: none;" class="evidence-component-ready">
-							<div style="padding: 1rem; background: #fee; border: 1px solid #fcc; border-radius: 4px;">
-								<strong>Data Error:</strong> Component {component?.name || 'Unknown'} received invalid data format
-								<pre>{JSON.stringify(queryData || 'undefined', null, 2)}</pre>
+						{:else}
+							<div class="evidence-debug">
+								<p>BarChart: Dataset is empty or loading...</p>
+								<p>Query: {component.props.data}</p>
 							</div>
-						</div>
-					{/if}
-				{/await}
-			<!-- Handle input components (no data prop needed) -->
-			{:else}
-				<div id="component-replacement-{placeholderIndex}" style="display: none;" class="evidence-component-ready">
-					{#if component.name === 'Dropdown'}
-						<!-- Evidence Dropdown expects data prop with options, need to extract from nested DropdownOptions -->
-						{console.log('[DROPDOWN DEBUG] Dropdown component:', component)}
-						{console.log('[DROPDOWN DEBUG] All components:', components)}
-						<svelte:component 
-							this={componentMap[component.name]} 
-							name={component.props?.name}
-							title={component.props?.title}
-							data={[
-								{value: "1", valueLabel: "Option One"},
-								{value: "2", valueLabel: "Option Two"}, 
-								{value: "3", valueLabel: "Option Three"}
-							]}
-						/>
-					{:else if component.name === 'DropdownOption'}
-						<!-- Skip DropdownOption - should be handled as children of Dropdown -->
-					{:else}
-						<svelte:component 
-							this={componentMap[component.name]} 
-							name={component.props?.name}
-							title={component.props?.title}
-						/>
-					{/if}
-				</div>
-			{/if}
-		{:else if component.name === 'Dropdown'}
-			<!-- Hybrid Evidence Dropdown Implementation -->
-			<div id="component-replacement-{placeholderIndex}" style="display: none;" class="evidence-component-ready">
-				{console.log('[DROPDOWN HYBRID] Component props:', component.props)}
-				{console.log('[DROPDOWN HYBRID] Dropdown options:', component.props?.dropdownOptions)}
-				
-				{#if component.props?.dropdownOptions && component.props.dropdownOptions.length > 0}
-					<!-- Custom dropdown implementation that works with our hybrid approach -->
-					<div class="evidence-dropdown-wrapper">
-						<label for="dropdown-{component.props.name}" class="evidence-dropdown-label">
-							{component.props.title || component.props.name || 'Select an option'}
-						</label>
-						<select 
-							id="dropdown-{component.props.name}"
-							class="evidence-dropdown-select"
-							on:change={(e) => {
-								const selectedValue = e.target.value;
-								inputValues.update(values => ({
-									...values,
-									[component.props.name]: selectedValue
-								}));
-								console.log(`[DROPDOWN] ${component.props.name} changed to:`, selectedValue);
-							}}
-						>
-							<option value="">-- Select --</option>
-							{#each component.props.dropdownOptions as option}
-								<option value={option.value}>{option.valueLabel}</option>
-							{/each}
-						</select>
+						{/if}
+					{/await}
+
+				{:else if component.name === 'TextInput'}
+					<!-- Evidence TextInput Component -->
+					<svelte:component 
+						this={componentMap[component.name]}
+						name={component.props.name}
+						placeholder={component.props.placeholder}
+						title={component.props?.title}
+					/>
+					
+					<!-- Debug: Show text input value -->
+					{#if $inputs[component.props.name]}
 						<div class="selected-value">
-							Selected: {$inputValues[component.props.name] || 'None'}
+							<strong>Text Input</strong>: {$inputs[component.props.name]?.value || 'Empty'}
 						</div>
-					</div>
-				{:else}
-					<div style="padding: 1rem; background: #fee; border: 1px solid #fcc; border-radius: 4px;">
-						<strong>Dropdown Error:</strong> No options found for {component.props?.name}
-					</div>
+					{/if}
+
+				{:else if component.name === 'QueryViewer'}
+					<!-- Skip QueryViewer components -->
 				{/if}
-			</div>
+			{/each}
+
+			<hr class="markdown">
+			<p class="markdown"><strong class="markdown">✅ Runtime Evidence Processing Active!</strong></p>
+			<ul class="markdown">
+				<li class="markdown"><strong class="markdown">Dashboard</strong>: Real DuckLake claims data</li>
+				<li class="markdown"><strong class="markdown">Source</strong>: <code class="markdown">flight_sql</code> via OAuth proxy authentication</li>
+				<li class="markdown"><strong class="markdown">Processing</strong>: Evidence markdown compiled server-side</li>
+				<li class="markdown"><strong class="markdown">Philosophy</strong>: Simple runtime compilation. Edit → Refresh → See changes.</li>
+			</ul>
+
+		{:else}
+			<p>Loading dashboard content...</p>
 		{/if}
-	{/each}
+	</div>
 {:else if !data.dashboardExists}
 	<div class="error-content">
 		<h1>Dashboard Not Found</h1>
@@ -510,31 +500,7 @@
 		font-family: monospace;
 	}
 	
-	/* Hybrid Evidence Dropdown Styling */
-	.evidence-dropdown-wrapper {
-		margin: 1rem 0;
-		padding: 1rem;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		background: #fafafa;
-	}
-	
-	.evidence-dropdown-label {
-		display: block;
-		font-weight: bold;
-		margin-bottom: 0.5rem;
-		color: #333;
-	}
-	
-	.evidence-dropdown-select {
-		width: 100%;
-		max-width: 300px;
-		padding: 0.5rem;
-		border: 1px solid #ccc;
-		border-radius: 4px;
-		font-size: 1rem;
-		background: white;
-	}
+	/* Evidence component styling is handled automatically */
 	
 	.selected-value {
 		margin-top: 0.5rem;
@@ -550,5 +516,14 @@
 		border-radius: 3px;
 		font-weight: bold;
 		border: 1px solid #2196F3;
+	}
+	
+	.evidence-debug {
+		margin-top: 0.5rem;
+		padding: 0.5rem;
+		background: #f0f8ff;
+		border-left: 3px solid #007acc;
+		font-size: 0.9rem;
+		color: #666;
 	}
 </style>

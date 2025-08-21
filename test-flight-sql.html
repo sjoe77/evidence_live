@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flight SQL Connection Test</title>
+    <style>
+        body { font-family: Arial; margin: 40px; }
+        .success { color: green; }
+        .error { color: red; }
+        .result { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Flight SQL Connection Test</h1>
+    
+    <p><strong>Endpoint:</strong> http://localhost:4180/query</p>
+    
+    <div id="results">
+        <p>Testing connection...</p>
+    </div>
+
+    <script>
+        async function testFlightSQL() {
+            const resultsDiv = document.getElementById('results');
+            
+            try {
+                // Test basic connection
+                resultsDiv.innerHTML = '<p>🔄 Testing Flight SQL connection...</p>';
+                
+                const response = await fetch('http://localhost:4180/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: 'SELECT \'Flight SQL Working!\' as message, CURRENT_DATE as today'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                resultsDiv.innerHTML = `
+                    <h2 class="success">✅ Flight SQL Connection Successful!</h2>
+                    <div class="result">
+                        <h3>Query Result:</h3>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    </div>
+                `;
+                
+                // Test DuckLake claims query
+                setTimeout(async () => {
+                    try {
+                        const claimsResponse = await fetch('http://localhost:4180/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                query: 'SELECT status, count(*) as count FROM my_ducklake.main.claims GROUP BY status LIMIT 5'
+                            })
+                        });
+                        
+                        const claimsResult = await claimsResponse.json();
+                        
+                        resultsDiv.innerHTML += `
+                            <h2 class="success">✅ DuckLake Claims Data:</h2>
+                            <div class="result">
+                                <pre>${JSON.stringify(claimsResult, null, 2)}</pre>
+                            </div>
+                        `;
+                    } catch (error) {
+                        resultsDiv.innerHTML += `
+                            <h2>⚠️ Claims Query (Optional):</h2>
+                            <p class="error">Error: ${error.message}</p>
+                            <p>This is OK if you don't have claims data set up yet.</p>
+                        `;
+                    }
+                }, 1000);
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <h2 class="error">❌ Connection Failed</h2>
+                    <p class="error">Error: ${error.message}</p>
+                    <p>Make sure your DuckLake stack is running:</p>
+                    <code>cd /Users/rajesh/ducklake_auth_stack && ./run_stack_simple.sh</code>
+                `;
+            }
+        }
+        
+        // Test immediately when page loads
+        testFlightSQL();
+    </script>
+</body>
+</html>

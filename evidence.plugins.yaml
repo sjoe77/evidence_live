@@ -1,0 +1,4 @@
+components: {}
+
+datasources:
+  "./plugins/flight-sql-http": {}

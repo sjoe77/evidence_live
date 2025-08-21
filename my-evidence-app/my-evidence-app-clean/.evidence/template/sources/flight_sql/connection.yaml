@@ -1,0 +1,5 @@
+name: flight_sql
+type: flight-sql-http
+options:
+  endpoint: "http://localhost:4180/query"
+  timeout: 30000

@@ -1,0 +1,8 @@
+{
+  "name": "flight-sql-datasource",
+  "version": "1.0.0",
+  "type": "module",
+  "evidence": {
+    "datasources": [["flight-sql", "Flight SQL"]]
+  }
+}

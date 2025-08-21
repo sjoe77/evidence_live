@@ -1,0 +1,4 @@
+name: flight_sql
+type: flight-sql
+options:
+  endpoint: "http://localhost:4180/query"

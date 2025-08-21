@@ -1,0 +1,23 @@
+{
+  "name": "@evidence-dev/flight-sql-http",
+  "version": "1.0.0",
+  "description": "Flight SQL HTTP datasource for Evidence",
+  "main": "index.js",
+  "type": "commonjs",
+  "evidence": {
+    "datasources": [
+      [
+        "flight-sql-http",
+        "fsql"
+      ]
+    ]
+  },
+  "keywords": [
+    "evidence",
+    "datasource", 
+    "flight-sql",
+    "http"
+  ],
+  "author": "Evidence Template",
+  "license": "MIT"
+}

@@ -1,0 +1,6 @@
+plugins:
+  datasources:
+    "./flight-sql-datasource": {}
+    
+datasource:
+  default: "flight_sql"
